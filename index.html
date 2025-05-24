@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flashcards with Score Tracker & Dark Mode</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    margin: 0; padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #121212;
+    color: #eee;
+    transition: background 0.3s, color 0.3s;
+  }
+  body.light-mode {
+    background: #f9f9f9;
+    color: #222;
+  }
+  #flashcard {
+    background: #222;
+    padding: 20px;
+    border-radius: 8px;
+    width: 80%;
+    max-width: 600px;
+    text-align: center;
+    margin-bottom: 20px;
+    user-select: none;
+    transition: background 0.3s, color 0.3s;
+  }
+  body.light-mode #flashcard {
+    background: #fff;
+    color: #222;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  }
+  #question {
+    font-size: 1.4em;
+    margin-bottom: 15px;
+  }
+  #answer {
+    font-size: 1.2em;
+    margin-bottom: 15px;
+    min-height: 3em;
+    color: #aaa;
+  }
+  body.light-mode #answer {
+    color: #555;
+  }
+  button {
+    background: #444;
+    border: none;
+    color: #eee;
+    padding: 10px 20px;
+    margin: 5px;
+    font-size: 1em;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background 0.3s;
+  }
+  button:hover {
+    background: #666;
+  }
+  body.light-mode button {
+    background: #ddd;
+    color: #222;
+  }
+  body.light-mode button:hover {
+    background: #bbb;
+  }
+  #scoreboard {
+    margin-top: 15px;
+    font-size: 1.1em;
+  }
+  #toggles {
+    margin-bottom: 15px;
+    width: 80%;
+    max-width: 600px;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  #toggles label {
+    cursor: pointer;
+    user-select: none;
+  }
+  #loadInput {
+    margin-bottom: 20px;
+    width: 80%;
+    max-width: 600px;
+    display: flex;
+    gap: 10px;
+  }
+  #loadInput input[type="file"] {
+    flex-grow: 1;
+  }
+  .wrong {
+    color: #f44336;
+  }
+  .correct {
+    color: #4caf50;
+  }
+</style>
+</head>
+<body>
+
+<h1>Flashcards</h1>
+
+<div id="loadInput">
+  <input type="file" id="fileInput" accept=".txt" />
+  <button onclick="loadFile()">Load Set (question|answer)</button>
+  <button onclick="resetProgress()">Reset Progress</button>
+</div>
+
+<div id="toggles">
+  <label>
+    <input type="checkbox" id="darkModeToggle" />
+    Dark Mode
+  </label>
+
+  <label>
+    <input type="checkbox" id="reviewWrongToggle" />
+    Review Wrong Answers Only
+  </label>
+</div>
+
+<div id="flashcard">
+  <div id="question">Load a flashcard set to start.</div>
+  <div id="answer"></div>
+  <button id="showAnswerBtn" onclick="showAnswer()" disabled>Show Answer</button>
+  <div id="markButtons" style="display:none;">
+    <button onclick="markCorrect()">I was Correct</button>
+    <button onclick="markWrong()">I was Wrong</button>
+  </div>
+</div>
+
+<div id="navigation" style="display:none;">
+  <button onclick="prevCard()">Previous</button>
+  <button onclick="nextCard()">Next</button>
+</div>
+
+<div id="scoreboard">
+  Correct: <span id="correctCount">0</span> |
+  Wrong: <span id="wrongCount">0</span> |
+  Accuracy: <span id="accuracy">0%</span>
+</div>
+
+<script>
+  // Variables
+  let cards = [];
+  let currentIndex = 0;
+  let correctCount = 0;
+  let wrongCards = new Set();
+  let reviewWrongOnly = false;
+
+  const questionElem = document.getElementById('question');
+  const answerElem = document.getElementById('answer');
+  const showAnswerBtn = document.getElementById('showAnswerBtn');
+  const markButtons = document.getElementById('markButtons');
+  const correctCountElem = document.getElementById('correctCount');
+  const wrongCountElem = document.getElementById('wrongCount');
+  const accuracyElem = document.getElementById('accuracy');
+  const reviewWrongToggle = document.getElementById('reviewWrongToggle');
+  const darkModeToggle = document.getElementById('darkModeToggle');
+  const navigation = document.getElementById('navigation');
+
+  // Dark mode toggle
+  darkModeToggle.addEventListener('change', () => {
+    if (darkModeToggle.checked) {
+      document.body.classList.add('light-mode');
+    } else {
+      document.body.classList.remove('light-mode');
+    }
+  });
+
+  // Review wrong toggle
+  reviewWrongToggle.addEventListener('change', () => {
+    reviewWrongOnly = reviewWrongToggle.checked;
+    if (reviewWrongOnly && wrongCards.size === 0) {
+      alert("No wrong cards to review yet!");
+      reviewWrongToggle.checked = false;
+      reviewWrongOnly = false;
+      return;
+    }
+    currentIndex = 0;
+    updateCard();
+    updateNavigation();
+  });
+
+  // Load cards from file
+  function loadFile() {
+    const fileInput = document.getElementById('fileInput');
+    if (!fileInput.files.length) {
+      alert('Please select a .txt file with format: question|answer');
+      return;
+    }
+    const file = fileInput.files[0];
+    if (!file.name.endsWith('.txt')) {
+      alert('Please load a .txt file');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const text = e.target.result.trim();
+      parseCards(text);
+      resetStats();
+      currentIndex = 0;
+      reviewWrongToggle.checked = false;
+      reviewWrongOnly = false;
+      updateCard();
+      updateNavigation();
+      showAnswerBtn.disabled = false;
+      markButtons.style.display = 'none';
+      answerElem.textContent = '';
+    };
+    reader.readAsText(file);
+  }
+
+  function parseCards(text) {
+    cards = [];
+    wrongCards.clear();
+    const lines = text.split('\n');
+    for (let line of lines) {
+      line = line.trim();
+      if (!line) continue;
+      const parts = line.split('|');
+      if (parts.length !== 2) continue;
+      cards.push({ question: parts[0].trim(), answer: parts[1].trim() });
+    }
+  }
+
+  // Reset progress button
+  function resetProgress() {
+    if (cards.length === 0) return;
+    correctCount = 0;
+    wrongCards.clear();
+    reviewWrongToggle.checked = false;
+    reviewWrongOnly = false;
+    currentIndex = 0;
+    updateScoreboard();
+    updateCard();
+    updateNavigation();
+    alert('Progress reset!');
+  }
+
+  // Scoreboard update
+  function updateScoreboard() {
+    correctCountElem.textContent = correctCount;
+    wrongCountElem.textContent = wrongCards.size;
+    const totalAnswered = correctCount + wrongCards.size;
+    const accuracy = totalAnswered ? Math.round((correctCount / totalAnswered) * 100) : 0;
+    accuracyElem.textContent = accuracy + '%';
+  }
+
+  // Update displayed card
+  function updateCard() {
+    if (cards.length === 0) {
+      questionElem.textContent = 'Load a flashcard set to start.';
+      answerElem.textContent = '';
+      showAnswerBtn.disabled = true;
+      markButtons.style.display = 'none';
+      navigation.style.display = 'none';
+      return;
+    }
+
+    let currentCards = reviewWrongOnly ? Array.from(wrongCards).map(i => cards[i]) : cards;
+    if (currentCards.length === 0) {
+      questionElem.textContent = reviewWrongOnly ? 'No wrong cards to review here.' : 'No cards available.';
+      answerElem.textContent = '';
+      showAnswerBtn.disabled = true;
+      markButtons.style.display = 'none';
+      navigation.style.display = 'none';
+      return;
+    }
+
+    if (currentIndex < 0) currentIndex = 0;
+    if (currentIndex >= currentCards.length) currentIndex = currentCards.length - 1;
+
+    let card = currentCards[currentIndex];
+    questionElem.textContent = card.question;
+    answerElem.textContent = '';
+    showAnswerBtn.disabled = false;
+    showAnswerBtn.style.display = 'inline-block';
+    markButtons.style.display = 'none';
+    navigation.style.display = currentCards.length > 1 ? 'block' : 'none';
+  }
+
+  // Show answer button handler
+  function showAnswer() {
+    let currentCards = reviewWrongOnly ? Array.from(wrongCards).map(i => cards[i]) : cards;
+    if (currentCards.length === 0) return;
+    let card = currentCards[currentIndex];
+    answerElem.textContent = card.answer;
+    showAnswerBtn.style.display = 'none';
+    markButtons.style.display = 'block';
+  }
+
+  // Mark as correct
+  function markCorrect() {
+    let globalIndex = getGlobalIndex();
+    if (wrongCards.has(globalIndex)) {
+      wrongCards.delete(globalIndex);
+    }
+    correctCount++;
+    updateScoreboard();
+    nextCardAfterMark();
+  }
+
+  // Mark as wrong
+  function markWrong() {
+    let globalIndex = getGlobalIndex();
+    if (!wrongCards.has(globalIndex)) {
+      wrongCards.add(globalIndex);
+    }
+    updateScoreboard();
+    nextCardAfterMark();
+  }
+
+  // Get index in main cards array for current card
+  function getGlobalIndex() {
+    if (!reviewWrongOnly) return currentIndex;
+    else return Array.from(wrongCards)[currentIndex];
+  }
+
+  // Move to next card after marking answer
+  function nextCardAfterMark() {
+    showAnswerBtn.style.display = 'inline-block';
+    markButtons.style.display = 'none';
+    answerElem.textContent = '';
+
+    // Update current index if reviewing wrong cards (may have removed a card)
+    if (reviewWrongOnly) {
+      if (wrongCards.size === 0) {
+        questionElem.textContent = 'No more wrong cards to review!';
+        answerElem.textContent = '';
+        showAnswerBtn.disabled = true;
+        markButtons.style.display = 'none';
+        navigation.style.display = 'none';
+        reviewWrongToggle.checked = false;
+        reviewWrongOnly = false;
+        currentIndex = 0;
+        return;
+      }
+      if (currentIndex >= wrongCards.size) {
+        currentIndex = wrongCards.size - 1;
+      }
+    } else {
+      if (currentIndex >= cards.length - 1) {
+        alert('You finished all flashcards!');
+        currentIndex = cards.length - 1;
+      } else {
+        currentIndex++;
+      }
+    }
+
+    updateCard();
+    updateNavigation();
+  }
+
+  // Navigation buttons
+  function prevCard() {
+    if (currentIndex > 0) currentIndex--;
+    updateCard();
+    updateNavigation();
+  }
+  function nextCard() {
+    let currentCards = reviewWrongOnly ? Array.from(wrongCards) : cards;
+    if (currentIndex < currentCards.length - 1) currentIndex++;
+    updateCard();
+    updateNavigation();
+  }
+  function updateNavigation() {
+    let currentCards = reviewWrongOnly ? Array.from(wrongCards) : cards;
+    navigation.style.display = currentCards.length > 1 ? 'block' : 'none';
+  }
+
+  // Reset stats helper
+  function resetStats() {
+    correctCount = 0;
+    wrongCards.clear();
+    updateScoreboard();
+  }
+</script>
+
+</body>
+</html>
